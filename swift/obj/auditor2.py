@@ -29,10 +29,15 @@ from swift.common.utils import lock_path, \
         get_logger, write_pickle, renamer, listdir, TRUE_VALUES
 from swift.common.daemon import Daemon
 
-SLEEP_BETWEEN_AUDITS = 30
 HSEXPIRE_FILE = 'hashes_expire.pkl'
 
-class SuffixCheckWorker(object):
+class SuffixExpireWorker(object):
+    """
+    This worker manages expiration of suffixes in each hashes.pkl.
+    Store expiration date to hashes_expire.pkl.
+    
+    """
+
     def __init__(self, conf):
         self.conf = conf
         self.logger = get_logger(conf, log_route='object-auditor2')
@@ -41,76 +46,80 @@ class SuffixCheckWorker(object):
             TRUE_VALUES
         self.expire_age = int(conf.get('expire_age', ONE_WEEK))
 
-        self.log_time = int(conf.get('log_time', 3600))
-        self.files_running_time = 0
-        self.passes = 0
-        self.errors = 0
     
     def check_all_devices(self, datadir=object_server.DATADIR):
+        """
+        Check expiration of suffix in hashes.pkl on all devices.
+
+        :params datadir: the name of object data dir. default is 'objects'
+        """
         device_dir = listdir(self.devices)
         shuffle(device_dir)
         for device in device_dir:
-            self.logger.debug("device:%s" % device)
             try:
                 if self.mount_check and not \
                         os.path.ismount(os.path.join(self.devices, device)):
-                    if self.logger:
-                        self.logger.debug(
-                            _('Skipping %s as it is not mounted'), device)
+                    self.logger.info(
+                            'Skipping %s as it is not mounted' % device)
                     continue
 
                 datadir_path = os.path.join(self.devices, device, datadir)
-                self.logger.debug("try to check device:%s" % datadir_path)
+                self.logger.info("try to check device: %s" % datadir_path)
                 self.check_all_partitions(datadir_path)
+                self.logger.info("end check device: %s" % datadir_path)
             except Exception,e:
                 self.logger.info( e)
                 
     def check_all_partitions(self, datadir_path):
-        for partition in os.listdir(datadir_path):
+        """
+        Check expiration of suffix in hashes.pkl on all partitions 
+        in one devcie.
+
+        :params datadir_path: the path of the device to check.
+        """
+        part_list = os.listdir(datadir_path)
+        part_list_len = len(part_list)
+        progress_n = part_list_len / 10
+
+        self.logger.info(" num of partitions: %d" % part_list_len)
+
+        cnt = 0
+        for partition in part_list:
             try:
-                self.logger.debug(" partition:%s" % partition)
                 part_path = os.path.join(datadir_path, partition)
                 if(not os.path.isdir(part_path)):
+                    self.logger.debug(" %s is not dir. skipped." % part_path)
                     continue
                 self.check_partition(part_path)
+                cnt += 1
+                if(cnt % progress_n == 0):
+                    self.logger.info("%d partitions processed" % cnt)
+                    
             except Exception,e:
-                self.logger.info( e)
-                
+                self.logger.error("check_all_partitions(): %s" % e)
+        self.logger.info("finished %d partitions" % cnt)
+        
 
     def check_partition(self, part_path):
-        hashes_expire_path = os.path.join(part_path, HSEXPIRE_FILE)
-        hashes_path = os.path.join(part_path, HASH_FILE)
+        """
+        Check expiration of suffix in hashes.pkl on the partition.
+
+        :params part_path: the path of the partition to check.
+        """
         expired_suffixes = self.update_hsexpire_pkl(part_path)
         if(expired_suffixes):
             self.logger.debug("  expired: %s" % expired_suffixes)
-            self.update_suffix_expire(expired_suffixes, part_path)
-
-
-    def update_suffix_expire(self, suffixes, part_path):
-        hsexpire_path = os.path.join(part_path, HSEXPIRE_FILE)
-
-        object_replicator.get_hashes(part_path, recalculate=suffixes)
-
-        with lock_path(part_path):
-            hsexpire = self.get_pkl(hsexpire_path)
-
-            now_date = time.time()
-            new_expire_date = now_date + self.expire_age
-
-            for s in suffixes:
-                hsexpire[s] = new_expire_date
-            
-            write_pickle(hsexpire, hsexpire_path, part_path, PICKLE_PROTOCOL)
-            
-            
+            self.update_expired_suffix(expired_suffixes, part_path)
 
     def get_pkl(self, hash_path):
         hashes = {}
         try:
             with open(hash_path, 'rb') as fph:
                 hashes = pickle.load(fph)
+        except IOError,ioe:
+            pass
         except Exception,e:
-            self.logger.debug("%s" % e)
+            self.logger.debug("get_pkl() %s" % e)
         return hashes
 
     def update_hsexpire_pkl(self, part_path):
@@ -155,16 +164,44 @@ class SuffixCheckWorker(object):
                     expired_keys.append(k)
                 
             return expired_keys
+
+
+    def update_expired_suffix(self, suffixes, part_path):
+        """
+        Recalculate the hash value of suffixes which are expired.
+        Then set new expiration date to hashes_expire.pkl
+        """
+        hsexpire_path = os.path.join(part_path, HSEXPIRE_FILE)
+
+        object_replicator.get_hashes(part_path, recalculate=suffixes)
+
+        with lock_path(part_path):
+            hsexpire = self.get_pkl(hsexpire_path)
+
+            now_date = time.time()
+            new_expire_date = now_date + self.expire_age
+
+            for s in suffixes:
+                hsexpire[s] = new_expire_date
+            
+            write_pickle(hsexpire, hsexpire_path, part_path, PICKLE_PROTOCOL)
+            
+            
         
 class ObjectAuditor2(Daemon):
-    """Audit objects."""
+    """
+    Additional Auditor daemon which checks suffix expiration and 
+    recalculates hash values.
+
+    """
 
     def __init__(self, conf, **options):
         self.conf = conf
         self.logger = get_logger(conf, log_route='object-auditor2')
+        self.sleep_time = conf.get("sleep_time", 3600)
 
     def _sleep(self):
-        time.sleep(SLEEP_BETWEEN_AUDITS)
+        time.sleep(sleep_time)
 
     def run_forever(self, *args, **kwargs):
         """Run the object audit until stopped."""
@@ -179,7 +216,7 @@ class ObjectAuditor2(Daemon):
     def run_once(self, *args, **kwargs):
         """Run the object audit once."""
         mode = kwargs.get('mode', 'once')
-        worker = SuffixCheckWorker(self.conf)
+        worker = SuffixExpireWorker(self.conf)
         worker.check_all_devices(datadir=object_server.DATADIR)
 
 
