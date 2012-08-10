@@ -33,7 +33,7 @@ ALL_SERVERS = ['account-auditor', 'account-server', 'container-auditor',
     'container-replicator', 'container-server', 'container-sync',
     'container-updater', 'object-auditor', 'object-server', 'object-expirer',
     'object-replicator', 'object-updater', 'proxy-server',
-    'account-replicator', 'account-reaper']
+    'account-replicator', 'account-reaper', 'object-xauditor']
 MAIN_SERVERS = ['proxy-server', 'account-server', 'container-server',
                 'object-server']
 REST_SERVERS = [s for s in ALL_SERVERS if s not in MAIN_SERVERS]
@@ -143,6 +143,7 @@ class Manager():
                 server_names.update([s for s in ALL_SERVERS if
                                      re.match(server.replace('*', '.*'), s)])
             else:
+                print "server %s" % server
                 server_names.add(server)
 
         self.servers = set()
