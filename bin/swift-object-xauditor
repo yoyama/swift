@@ -19,6 +19,23 @@ from swift.common.utils import parse_options
 from swift.common.daemon import run_daemon
 from optparse import OptionParser
 
+'''
+swift-object-xauditor is an additional auditor which manages
+expiration of suffix in hashes.pkl.
+This auditor recalc suffix hash values after expired.
+So it detects missing files and recovers them by replication.
+(See bug #971914)
+
+To enable it, add folllowing section to object-server.conf
+
+[object-xauditor]
+expire_age=604800
+sleep_time=3600
+
+expire_age is next expiration date in seconds.
+sleep_time is wait time when onece chek after finished.
+
+'''
 if __name__ == '__main__':
     parser = OptionParser("%prog CONFIG [options]")
     conf_file, options = parse_options(parser=parser, once=True)
