@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from swift.obj.auditor2 import ObjectAuditor2
+from swift.obj.xauditor import ObjectXAuditor
 from swift.common.utils import parse_options
 from swift.common.daemon import run_daemon
 from optparse import OptionParser
@@ -22,4 +22,4 @@ from optparse import OptionParser
 if __name__ == '__main__':
     parser = OptionParser("%prog CONFIG [options]")
     conf_file, options = parse_options(parser=parser, once=True)
-    run_daemon(ObjectAuditor2, conf_file, **options)
+    run_daemon(ObjectXAuditor, conf_file, **options)
