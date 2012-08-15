@@ -18,6 +18,7 @@ import unittest
 import tempfile
 import os
 import time
+import cPickle as pickle
 from contextlib import contextmanager
 from shutil import rmtree
 from hashlib import md5
@@ -44,50 +45,24 @@ class TestXAuditor(unittest.TestCase):
         self.logger = FakeLogger()
         rmtree(self.testdir, ignore_errors=1)
 
-        mkdirs(os.path.join(self.devices, 'sda'))
-        mkdirs(os.path.join(self.devices, 'sdb'))
-
-        self.objects_path_sda = os.path.join(self.devices,
-                                             'sda', 'objects')
-        self.objects_path_sdb = os.path.join(self.devices,
-                                             'sdb', 'objects')
-        self.objects_path_all = [self.objects_path_sda,
-                                 self.objects_path_sdb]
-
-        for path in self.objects_path_all:
-            os.mkdir(path)
-            for part in ['0', '1', '2', '3']:
-                os.mkdir(os.path.join(path, part))
-
-        self.part_path_sda = []
-        self.part_path_sdb = []
-        for part in ['0', '1', '2', '3']:
-            self.part_path_sda.append(os.path.join(self.objects_path_sda,
-                                                   part))
-            self.part_path_sdb.append(os.path.join(self.objects_path_sdb,
-                                                   part))
+        self.device_list = ['sda', 'sdb']
+        self.objects_path_all = {}
+        self.part_path_all = {}
+        for dl in self.device_list:
+            mkdirs(os.path.join(self.devices, dl))
+            objects_path = os.path.join(self.devices, dl, 'objects')
+            mkdirs(objects_path)
+            self.objects_path_all[dl] = objects_path
+            self.part_path_all[dl] = []
+            for part in range(0, 20):
+                part_path = os.path.join(objects_path, '%s' % part)
+                os.mkdir(part_path)
+                self.part_path_all[dl].append(part_path)
 
         self.conf = dict(
             devices=self.devices,
             mount_check='false',
             expire_age='2')
-
-        self.disk_file = self.save_object(1024, 'sda', '0', 'a', 'c', 'o')
-        self.part_path = os.path.join(self.disk_file.device_path, DATADIR, '0')
-        self.suffixes = [s for s in os.listdir(self.part_path)
-                         if len(s) == 3]
-
-        self.disk_files_sdb = []
-        self.disk_files_sdb.append(self.save_object(1024, 'sdb',
-                                                    '0', 'a', 'c', 'o'))
-        self.disk_files_sdb.append(self.save_object(1024, 'sdb',
-                                                    '0', 'a', 'c', 'o2'))
-        self.disk_files_sdb.append(self.save_object(1024, 'sdb',
-                                                    '1', 'a', 'c', 'o'))
-        self.disk_files_sdb.append(self.save_object(1024, 'sdb',
-                                                    '2', 'a', 'c', 'o'))
-        self.disk_files_sdb.append(self.save_object(1024, 'sdb',
-                                                    '3', 'a', 'c', 'o'))
 
     def save_object(self, size, dev, part, account, container, obj):
         disk_file = DiskFile(self.devices, dev, part, account, container,
@@ -113,100 +88,223 @@ class TestXAuditor(unittest.TestCase):
         unit.xattr_data = {}
 
     def test_object_xaudit_get_pkl(self):
-        self.seworker = xauditor.SuffixExpireWorker(self.conf)
-        hashes = self.seworker.get_pkl(os.path.join(self.part_path, HASH_FILE))
+        device = self.device_list[0]
+        part_path = self.part_path_all[device][0]
+        disk_file = self.save_object(100, device, part_path, 'a', 'c', 'o')
+        suffixes = [s for s in os.listdir(part_path) if len(s) == 3]
+
+        seworker = xauditor.SuffixExpireWorker(self.conf)
+        hashes = seworker.get_pkl(os.path.join(part_path, HASH_FILE))
         self.assertEquals(len(hashes.keys()), 0)
 
-        object_replicator.get_hashes(self.part_path, recalculate=self.suffixes)
-        hashes = self.seworker.get_pkl(os.path.join(self.part_path, HASH_FILE))
+        object_replicator.get_hashes(part_path, recalculate=suffixes)
+        hashes = seworker.get_pkl(os.path.join(part_path, HASH_FILE))
+
         self.assertEquals(len(hashes.keys()), 1)
 
+    def test_object_xaudit_get_pkl_2(self):
+        def mock_pickle_load(path):
+            raise Exception("mock_pickle_load")
+
+        @contextmanager
+        def _dummy_load(mock):
+            original = pickle.load
+            pickle.load = mock
+            yield
+            pickle.load = original
+
+        device = self.device_list[0]
+        part_path = self.part_path_all[device][0]
+        disk_file = self.save_object(100, device, part_path, 'a', 'c', 'o')
+        object_replicator.get_hashes(part_path, do_listdir=True)
+
+        seworker = xauditor.SuffixExpireWorker(self.conf)
+        with _dummy_load(mock_pickle_load):
+            hashes = seworker.get_pkl(os.path.join(part_path, HASH_FILE))
+
     def test_object_xaudit_update_hsexpire_pkl(self):
-        self.seworker = xauditor.SuffixExpireWorker(self.conf)
+        device = self.device_list[0]
+        part_path = self.part_path_all[device][0]
+        disk_file = self.save_object(100, device, part_path, 'a', 'c', 'o')
+        suffixes = [s for s in os.listdir(part_path) if len(s) == 3]
+
+        seworker = xauditor.SuffixExpireWorker(self.conf)
 
         '''
         No hashes.pkl and expire_hashes file.
         '''
-        suffixes = self.seworker.update_hsexpire_pkl(self.part_path)
-        hsexpire = self.seworker.get_pkl(os.path.join(self.part_path,
-                                                      HSEXPIRE_FILE))
+        expired_suffixes = seworker.update_hsexpire_pkl(part_path)
+        hsexpire = seworker.get_pkl(os.path.join(part_path,
+                                                 HSEXPIRE_FILE))
         self.assertEquals(len(hsexpire.keys()), 0)
-        self.assertEquals(len(suffixes), 0)
 
         '''
         a suffix in hashes.pkl file.
         '''
-        object_replicator.get_hashes(self.part_path, recalculate=self.suffixes)
-        suffixes = self.seworker.update_hsexpire_pkl(self.part_path)
-        hsexpire = self.seworker.get_pkl(os.path.join(self.part_path,
-                                                      HSEXPIRE_FILE))
+        object_replicator.get_hashes(part_path, recalculate=suffixes)
+        expired_suffixes = seworker.update_hsexpire_pkl(part_path)
+        hsexpire = seworker.get_pkl(os.path.join(part_path,
+                                                 HSEXPIRE_FILE))
         self.assertEquals(len(hsexpire.keys()), 1)
-        self.assertEquals(len(suffixes), 0)
 
         '''
         a suffix added. hashes.pkl and expire_hash.pkl exist.
         '''
-        for i in range(0, 10):
-            disk_file2 = self.save_object(1024, 'sda', '0', 'a', 'c',
+        for i in range(0, 100):
+            disk_file2 = self.save_object(1024, device, '0', 'a', 'c',
                                           'obj%d' % i)
-            if(self.disk_file.datadir[-3:] != disk_file2.datadir[-3:]):
+            if(disk_file.datadir[-3:] != disk_file2.datadir[-3:]):
                 break
-        object_replicator.get_hashes(self.part_path, do_listdir=True)
-        suffixes = self.seworker.update_hsexpire_pkl(self.part_path)
-        hsexpire = self.seworker.get_pkl(os.path.join(self.part_path,
-                                                      HSEXPIRE_FILE))
+        object_replicator.get_hashes(part_path, do_listdir=True)
+        expired_suffixes = seworker.update_hsexpire_pkl(part_path)
+        hsexpire = seworker.get_pkl(os.path.join(part_path,
+                                                 HSEXPIRE_FILE))
         self.assertEquals(len(hsexpire.keys()), 2)
-        self.assertEquals(len(suffixes), 0)
 
         '''
         Then remove suffix except for the added in previous test.
         '''
-        for s in self.suffixes:
-            rmtree(os.path.join(self.part_path, s))
-        object_replicator.get_hashes(self.part_path, recalculate=self.suffixes)
-        suffixes = self.seworker.update_hsexpire_pkl(self.part_path)
-        hsexpire = self.seworker.get_pkl(os.path.join(self.part_path,
-                                                      HSEXPIRE_FILE))
-        hashes = self.seworker.get_pkl(os.path.join(self.part_path,
-                                                      HASH_FILE))
+        for s in suffixes:
+            rmtree(os.path.join(part_path, s))
+        object_replicator.get_hashes(part_path, do_listdir=True)
+        expired_suffixes = seworker.update_hsexpire_pkl(part_path)
+        hsexpire = seworker.get_pkl(os.path.join(part_path,
+                                                 HSEXPIRE_FILE))
+        hashes = seworker.get_pkl(os.path.join(part_path, HASH_FILE))
         self.assertEquals(len(hsexpire.keys()), len(hashes))
-        self.assertEquals(len(suffixes), 0)
 
         '''
         a suffix expired
         '''
         time.sleep(int(self.conf.get('expire_age')) + 1)
-        suffixes = self.seworker.update_hsexpire_pkl(self.part_path)
-        hsexpire = self.seworker.get_pkl(os.path.join(self.part_path,
-                                                      HSEXPIRE_FILE))
+        expired_suffixes = seworker.update_hsexpire_pkl(part_path)
+        hsexpire = seworker.get_pkl(os.path.join(part_path,
+                                                 HSEXPIRE_FILE))
         self.assertEquals(len(hsexpire.keys()), 1)
-        self.assertEquals(len(suffixes), 1)
+        self.assertEquals(len(expired_suffixes), 1)
+
+    def test_update_expired_suffix(self):
+        device = self.device_list[0]
+        part_path = self.part_path_all[device][0]
+        disk_file = self.save_object(100, device, part_path, 'a', 'c', 'o')
+        suffixes = [s for s in os.listdir(part_path) if len(s) == 3]
+
+        seworker = xauditor.SuffixExpireWorker(self.conf)
+        seworker.update_expired_suffix(suffixes, part_path)
+        hsexpire = seworker.get_pkl(os.path.join(part_path,
+                                                 HSEXPIRE_FILE))
+        self.assertEquals(len(suffixes), len(hsexpire.keys()))
 
     def test_object_xaudit_check_partition(self):
-        self.seworker = xauditor.SuffixExpireWorker(self.conf)
+        device = self.device_list[0]
+        part_path = self.part_path_all[device][0]
+
+        seworker = xauditor.SuffixExpireWorker(self.conf)
 
         '''
         Empty parition
         '''
-        self.seworker.check_partition(self.part_path)
+        seworker.check_partition(part_path)
+
+        '''
+        One suffix parition
+        '''
+        disk_file = self.save_object(100, device, part_path, 'a', 'c', 'o')
+        object_replicator.get_hashes(part_path, do_listdir=True)
+        seworker.check_partition(part_path)
+
+        '''
+        An Expiration is happened.
+        '''
+        time.sleep(int(self.conf.get('expire_age')) + 1)
+        seworker.check_partition(part_path)
 
         '''
         No exist partition dir
         '''
-        self.seworker.check_partition("%s_noexist" % self.part_path)
+        seworker.check_partition("%s_noexist" % part_path)
 
     def test_object_xaudit_check_all_partitions(self):
-        self.seworker = xauditor.SuffixExpireWorker(self.conf)
+        device = self.device_list[1]
+        objects_path = self.objects_path_all[device]
+        seworker = xauditor.SuffixExpireWorker(self.conf)
 
-        for pp in self.part_path_sdb:
+        for pp in self.part_path_all[device]:
+            disk_file = self.save_object(100, device, pp, 'a', 'c', 'o')
+
+        for pp in self.part_path_all[device]:
             object_replicator.get_hashes(pp, do_listdir=True)
 
-        self.seworker.check_all_partitions(self.objects_path_sdb)
-        for pp in self.part_path_sdb:
+        seworker.check_all_partitions(objects_path)
+        for pp in self.part_path_all[device]:
             hf = os.path.join(pp, HASH_FILE)
             hsef = os.path.join(pp, HSEXPIRE_FILE)
             self.assertEqual(os.path.isfile(hf), True)
             self.assertEqual(os.path.isfile(hsef), True)
+
+    def test_object_xaudit_check_all_partitions_2(self):
+        def mock_is_dir1(path):
+            return False
+
+        def mock_is_dir2(path):
+            raise Exception("mock_is_dir2")
+
+        @contextmanager
+        def _dummy_isdir(mock_is_dir):
+            original = os.path.isdir
+            os.path.isdir = mock_is_dir
+            yield
+            os.path.isdir = original
+
+        device = self.device_list[1]
+        objects_path = self.objects_path_all[device]
+        seworker = xauditor.SuffixExpireWorker(self.conf)
+        with _dummy_isdir(mock_is_dir1):
+            seworker.check_all_partitions(objects_path)
+
+        with _dummy_isdir(mock_is_dir2):
+            seworker.check_all_partitions(objects_path)
+
+    def test_object_xaudit_check_all_devices(self):
+        class SuffixExpireWorkerMock(object):
+            datadir_path_list = []
+
+            def mock_check_all_partitions(self, datadir_path):
+                self.datadir_path_list.append(datadir_path)
+
+        class SuffixExpireWorkerMock2(object):
+            is_called = False
+
+            def mock_check_all_partitions(self, datadir_path):
+                self.is_called = True
+                raise Exception("Error")
+
+        @contextmanager
+        def _mock_suffix_expire_worker(mock):
+            original = SuffixExpireWorker.check_all_partitions
+            SuffixExpireWorker.check_all_partitions \
+                = mock.mock_check_all_partitions
+            yield
+            SuffixExpireWorker.check_all_partitions = original
+
+        seworker = xauditor.SuffixExpireWorker(self.conf)
+        my_mock = SuffixExpireWorkerMock()
+
+        with _mock_suffix_expire_worker(my_mock):
+            seworker.mount_check = True
+            seworker.check_all_devices()
+            self.assertEqual(len(my_mock.datadir_path_list), 0)
+
+            my_mock.datadir_path_list = []
+            seworker.mount_check = False
+            seworker.check_all_devices()
+            self.assertEqual(len(my_mock.datadir_path_list), 2)
+
+        my_mock2 = SuffixExpireWorkerMock2()
+        with _mock_suffix_expire_worker(my_mock2):
+            seworker.mount_check = False
+            seworker.check_all_devices()
+            self.assertEqual(my_mock2.is_called, True)
 
     def test_run_onece(self):
         class SuffixExpireWorkerMock(object):
@@ -238,10 +336,15 @@ class TestXAuditor(unittest.TestCase):
         class ObjectXAuditorMock(object):
             check_args = ()
             check_kwargs = {}
+            called_run_once_exception = False
 
             def mock_run_once(self, *args, **kwargs):
                 self.check_args = args
                 self.check_kwargs = kwargs
+
+            def mock_run_once_exception(self, *args, **kwargs):
+                self.called_run_once_exception = True
+                raise Exception("run_once_error")
 
             def mock_sleep(self):
                 raise StopForever('stop')
@@ -249,14 +352,26 @@ class TestXAuditor(unittest.TestCase):
         my_xauditor = xauditor.ObjectXAuditor(dict(devices=self.devices,
                                                    mount_check='false'))
         mocker = ObjectXAuditorMock()
-        my_xauditor.run_once = mocker.mock_run_once
-        my_xauditor._sleep = mocker.mock_sleep
         try:
+            my_xauditor.run_once = mocker.mock_run_once
+            my_xauditor._sleep = mocker.mock_sleep
             self.assertRaises(StopForever, my_xauditor.run_forever)
             self.assertEquals(mocker.check_args, ())
             self.assertEquals(mocker.check_kwargs['mode'], 'forever')
+
+            my_xauditor.run_once = mocker.mock_run_once_exception
+            self.assertRaises(StopForever, my_xauditor.run_forever)
+            self.assertEquals(mocker.called_run_once_exception, True)
+
         finally:
             pass
+
+    def test_sleep(self):
+        my_xauditor = xauditor.ObjectXAuditor(dict(devices=self.devices,
+                                                   mount_check='false',
+                                                   sleep_time='2'))
+        my_xauditor._sleep()
+
 
 if __name__ == '__main__':
     unittest.main()

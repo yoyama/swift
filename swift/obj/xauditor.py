@@ -68,7 +68,7 @@ class SuffixExpireWorker(object):
                 self.check_all_partitions(datadir_path)
                 self.logger.info("end check device: %s" % datadir_path)
             except Exception, e:
-                self.logger.info(e)
+                self.logger.error("check_all_devices():%s" % e)
 
     def check_all_partitions(self, datadir_path):
         """
@@ -92,7 +92,7 @@ class SuffixExpireWorker(object):
                     continue
                 self.check_partition(part_path)
                 cnt += 1
-                if(cnt % progress_n == 0):
+                if(progress_n > 0 and cnt % progress_n == 0):
                     self.logger.info("%d partitions processed" % cnt)
 
             except Exception, e:
@@ -119,7 +119,7 @@ class SuffixExpireWorker(object):
         except IOError, ioe:
             pass
         except Exception, e:
-            self.logger.debug("get_pkl() %s" % e)
+            self.logger.error("get_pkl() %s" % e)
         return hashes
 
     def update_hsexpire_pkl(self, part_path):
@@ -129,6 +129,7 @@ class SuffixExpireWorker(object):
         Add new suffixes with expiration date.
         Delete obsolete suffixes.
         Return expired suffixes.
+
         :params part_path: The path to the partition
         :returns: a list of expired suffixes
         """

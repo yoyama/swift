@@ -334,6 +334,8 @@ Configure the Storage nodes
         [object-updater]
 
         [object-auditor]
+
+        [object-xauditor]
         EOF
 
 #. Start the storage services. If you use this command, it will try to start
@@ -357,6 +359,7 @@ Configure the Storage nodes
          swift-init object-replicator start
          swift-init object-updater start
          swift-init object-auditor start
+         swift-init object-xauditor start
          swift-init container-server start
          swift-init container-replicator start
          swift-init container-updater start

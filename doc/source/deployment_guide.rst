@@ -313,6 +313,18 @@ bytes_per_second    10000000        Maximum bytes audited per second. Should
                                     specs. 0 is unlimited.
 ==================  ==============  ==========================================
 
+[object-xauditor]
+
+==================  ==============  ==========================================
+Option              Default         Description
+------------------  --------------  ------------------------------------------
+log_name            object-auditor  Label used when logging
+log_facility        LOG_LOCAL0      Syslog log facility
+log_level           INFO            Logging level
+expire_age          604800          Next expiration in seconds.
+sleep_time          3600            Sleep time in seconds for next audit.
+==================  ==============  ==========================================
+
 ------------------------------
 Container Server Configuration
 ------------------------------
