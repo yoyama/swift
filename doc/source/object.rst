@@ -44,3 +44,11 @@ Object Auditor
     :undoc-members:
     :show-inheritance:
 
+
+Object Extended Auditor
+==============
+
+.. automodule:: swift.obj.xauditor
+    :members:
+    :undoc-members:
+    :show-inheritance:
