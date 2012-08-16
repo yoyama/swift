@@ -143,7 +143,6 @@ class Manager():
                 server_names.update([s for s in ALL_SERVERS if
                                      re.match(server.replace('*', '.*'), s)])
             else:
-                print "server %s" % server
                 server_names.add(server)
 
         self.servers = set()
