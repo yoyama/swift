@@ -21,6 +21,7 @@ import time
 from shutil import rmtree
 from hashlib import md5
 from tempfile import mkdtemp
+from contextlib import contextmanager
 from test.unit import FakeLogger
 from swift.obj import auditor
 from swift.obj import server as object_server
@@ -29,6 +30,7 @@ from swift.common.utils import hash_path, mkdirs, normalize_timestamp, \
     renamer, storage_directory
 from swift.obj.replicator import invalidate_hash
 from swift.common.exceptions import AuditException
+from swift.obj.xauditor import SuffixExpireWorker
 
 
 class TestAuditor(unittest.TestCase):
@@ -225,6 +227,29 @@ class TestAuditor(unittest.TestCase):
             os.write(fd, 'extra_data')
         self.auditor.audit_all_objects()
         self.assertEquals(self.auditor.quarantines, pre_quarantines + 1)
+
+    def test_object_run_once_suffix_check(self):
+        class SuffixExpireWorkerMock(object):
+            mock_is_called = False
+
+            def mock_check_all_devices(self,
+                                       datadir=object_server.DATADIR):
+                self.mock_is_called = True
+
+        @contextmanager
+        def _mock_suffix_expire_worker(mock):
+            original = SuffixExpireWorker.check_all_devices
+            SuffixExpireWorker.check_all_devices = \
+                mock.mock_check_all_devices
+            yield
+            SuffixExpireWorker.check_all_devices = original
+
+        self.auditor = auditor.ObjectAuditor(self.conf)
+        self.auditor.sfx_enable = True
+        mock = SuffixExpireWorkerMock()
+        with _mock_suffix_expire_worker(mock):
+            self.auditor.run_once()
+            self.assertEquals(mock.mock_is_called, True)
 
     def test_object_run_fast_track_non_zero(self):
         self.auditor = auditor.ObjectAuditor(self.conf)

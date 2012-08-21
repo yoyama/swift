@@ -30,8 +30,7 @@ from swift.obj.server import DiskFile, write_metadata, DATADIR
 from swift.obj import replicator as object_replicator
 from swift.obj.replicator import PICKLE_PROTOCOL, ONE_WEEK, HASH_FILE, \
     invalidate_hash
-from swift.obj.xauditor import HSEXPIRE_FILE, SuffixExpireWorker, \
-    ObjectXAuditor
+from swift.obj.xauditor import HSEXPIRE_FILE, SuffixExpireWorker
 from swift.common.utils import hash_path, mkdirs, normalize_timestamp, \
     renamer, storage_directory
 from swift.common.exceptions import AuditException
@@ -62,7 +61,7 @@ class TestXAuditor(unittest.TestCase):
         self.conf = dict(
             devices=self.devices,
             mount_check='false',
-            expire_age='2')
+            sfx_expire_age='2')
 
     def save_object(self, size, dev, part, account, container, obj):
         disk_file = DiskFile(self.devices, dev, part, account, container,
@@ -176,7 +175,7 @@ class TestXAuditor(unittest.TestCase):
         '''
         a suffix expired
         '''
-        time.sleep(int(self.conf.get('expire_age')) + 1)
+        time.sleep(int(self.conf.get('sfx_expire_age')) + 1)
         expired_suffixes = seworker.update_hsexpire_pkl(part_path)
         hsexpire = seworker.get_pkl(os.path.join(part_path,
                                                  HSEXPIRE_FILE))
@@ -216,7 +215,7 @@ class TestXAuditor(unittest.TestCase):
         '''
         An Expiration is happened.
         '''
-        time.sleep(int(self.conf.get('expire_age')) + 1)
+        time.sleep(int(self.conf.get('sfx_expire_age')) + 1)
         seworker.check_partition(part_path)
 
         '''
@@ -305,73 +304,6 @@ class TestXAuditor(unittest.TestCase):
             seworker.mount_check = False
             seworker.check_all_devices()
             self.assertEqual(my_mock2.is_called, True)
-
-    def test_run_onece(self):
-        class SuffixExpireWorkerMock(object):
-            datadir = None
-
-            def mock_check_all_devices(self, datadir):
-                self.datadir = datadir
-
-        @contextmanager
-        def _mock_suffix_expire_worker(mock):
-            original = SuffixExpireWorker.check_all_devices
-            SuffixExpireWorker.check_all_devices = mock.mock_check_all_devices
-            yield
-            SuffixExpireWorker.check_all_devices = original
-
-        my_mock = SuffixExpireWorkerMock()
-        my_xauditor = ObjectXAuditor(dict(devices=self.devices,
-                                          mount_check='false'))
-        self.assertEquals(my_mock.datadir, None)
-        with _mock_suffix_expire_worker(my_mock):
-            my_xauditor.run_once()
-            self.assertEquals(my_mock.datadir, object_server.DATADIR)
-
-    def test_run_forever(self):
-
-        class StopForever(Exception):
-            pass
-
-        class ObjectXAuditorMock(object):
-            check_args = ()
-            check_kwargs = {}
-            called_run_once_exception = False
-
-            def mock_run_once(self, *args, **kwargs):
-                self.check_args = args
-                self.check_kwargs = kwargs
-
-            def mock_run_once_exception(self, *args, **kwargs):
-                self.called_run_once_exception = True
-                raise Exception("run_once_error")
-
-            def mock_sleep(self):
-                raise StopForever('stop')
-
-        my_xauditor = xauditor.ObjectXAuditor(dict(devices=self.devices,
-                                                   mount_check='false'))
-        mocker = ObjectXAuditorMock()
-        try:
-            my_xauditor.run_once = mocker.mock_run_once
-            my_xauditor._sleep = mocker.mock_sleep
-            self.assertRaises(StopForever, my_xauditor.run_forever)
-            self.assertEquals(mocker.check_args, ())
-            self.assertEquals(mocker.check_kwargs['mode'], 'forever')
-
-            my_xauditor.run_once = mocker.mock_run_once_exception
-            self.assertRaises(StopForever, my_xauditor.run_forever)
-            self.assertEquals(mocker.called_run_once_exception, True)
-
-        finally:
-            pass
-
-    def test_sleep(self):
-        my_xauditor = xauditor.ObjectXAuditor(dict(devices=self.devices,
-                                                   mount_check='false',
-                                                   sleep_time='2'))
-        my_xauditor._sleep()
-
 
 if __name__ == '__main__':
     unittest.main()

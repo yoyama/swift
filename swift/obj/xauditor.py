@@ -40,11 +40,11 @@ class SuffixExpireWorker(object):
 
     def __init__(self, conf):
         self.conf = conf
-        self.logger = get_logger(conf, log_route='object-xauditor')
+        self.logger = get_logger(conf, log_route='object-auditor')
         self.devices = conf.get('devices', '/srv/node')
         self.mount_check = conf.get('mount_check', 'true').lower() in \
             TRUE_VALUES
-        self.expire_age = int(conf.get('expire_age', ONE_WEEK))
+        self.expire_age = int(conf.get('sfx_expire_age', ONE_WEEK))
         self.logger.debug("expire_age :%d" % self.expire_age)
 
     def check_all_devices(self, datadir=object_server.DATADIR):
@@ -186,36 +186,3 @@ class SuffixExpireWorker(object):
                 hsexpire[s] = new_expire_date
 
             write_pickle(hsexpire, hsexpire_path, part_path, PICKLE_PROTOCOL)
-
-
-class ObjectXAuditor(Daemon):
-    """
-    Exteneded auditor daemon which checks suffix expiration and
-    recalculates hash values.
-
-    """
-
-    def __init__(self, conf, **options):
-        self.conf = conf
-        self.logger = get_logger(conf, log_route='object-xauditor')
-        self.sleep_time = int(conf.get("sleep_time", 3600))
-        self.logger.debug("sleep_time :%d" % self.sleep_time)
-
-    def _sleep(self):
-        time.sleep(self.sleep_time)
-
-    def run_forever(self, *args, **kwargs):
-        """Run the object audit until stopped."""
-        kwargs = {'mode': 'forever'}
-        while True:
-            try:
-                self.run_once(**kwargs)
-            except (Exception, Timeout):
-                self.logger.exception(_('ERROR auditing'))
-            self._sleep()
-
-    def run_once(self, *args, **kwargs):
-        """Run the object audit once."""
-        mode = kwargs.get('mode', 'once')
-        worker = SuffixExpireWorker(self.conf)
-        worker.check_all_devices(datadir=object_server.DATADIR)

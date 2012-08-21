@@ -24,6 +24,8 @@ from swift.common.utils import get_logger, audit_location_generator, \
 from swift.common.exceptions import AuditException, DiskFileError, \
     DiskFileNotExist
 from swift.common.daemon import Daemon
+from swift.obj.replicator import ONE_WEEK
+from swift.obj.xauditor import SuffixExpireWorker
 
 SLEEP_BETWEEN_AUDITS = 30
 
@@ -199,6 +201,10 @@ class ObjectAuditor(Daemon):
         self.conf_zero_byte_fps = int(conf.get(
                 'zero_byte_files_per_second', 50))
 
+        self.sfx_enable = conf.get('sfx_enable', 'f').lower() in \
+            TRUE_VALUES
+        self.sfx_expire_age = int(conf.get('sfx_expire_age', ONE_WEEK))
+
     def _sleep(self):
         time.sleep(SLEEP_BETWEEN_AUDITS)
 
@@ -214,6 +220,9 @@ class ObjectAuditor(Daemon):
         kwargs = {'mode': 'forever'}
         if parent:
             kwargs['zero_byte_fps'] = zbo_fps or self.conf_zero_byte_fps
+        else:
+            self.sfx_enable = False
+
         while True:
             try:
                 self.run_once(**kwargs)
@@ -224,6 +233,14 @@ class ObjectAuditor(Daemon):
     def run_once(self, *args, **kwargs):
         """Run the object audit once."""
         mode = kwargs.get('mode', 'once')
+
+        if(self.sfx_enable):
+            self.logger.debug("sfx_enable is true")
+            worker = SuffixExpireWorker(self.conf)
+            worker.check_all_devices(datadir=object_server.DATADIR)
+        else:
+            self.logger.debug("sfx_enable is false")
+
         zero_byte_only_at_fps = kwargs.get('zero_byte_fps', 0)
         worker = AuditorWorker(self.conf,
                                zero_byte_only_at_fps=zero_byte_only_at_fps)

@@ -59,7 +59,6 @@ setup(
         'bin/swift-get-nodes',
         'bin/swift-init',
         'bin/swift-object-auditor',
-        'bin/swift-object-xauditor',
         'bin/swift-object-expirer',
         'bin/swift-object-info',
         'bin/swift-object-replicator',
