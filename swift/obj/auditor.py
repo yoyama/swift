@@ -234,14 +234,13 @@ class ObjectAuditor(Daemon):
         """Run the object audit once."""
         mode = kwargs.get('mode', 'once')
 
-        if(self.sfx_enable):
-            self.logger.debug("sfx_enable is true")
-            worker = SuffixExpireWorker(self.conf)
-            worker.check_all_devices(datadir=object_server.DATADIR)
-        else:
-            self.logger.debug("sfx_enable is false")
-
         zero_byte_only_at_fps = kwargs.get('zero_byte_fps', 0)
         worker = AuditorWorker(self.conf,
                                zero_byte_only_at_fps=zero_byte_only_at_fps)
         worker.audit_all_objects(mode=mode)
+
+        """Suffix expiration check."""
+        if(self.sfx_enable):
+            worker = SuffixExpireWorker(self.conf)
+            worker.check_all_devices(datadir=object_server.DATADIR)
+

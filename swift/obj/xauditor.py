@@ -64,9 +64,10 @@ class SuffixExpireWorker(object):
                     continue
 
                 datadir_path = os.path.join(self.devices, device, datadir)
-                self.logger.info("try to check device: %s" % datadir_path)
+                self.logger.info("sfx: try to check device: %s" % datadir_path)
                 self.check_all_partitions(datadir_path)
-                self.logger.info("end check device: %s" % datadir_path)
+                self.logger.info("sfx: end check device: %s" % datadir_path)
+                self.logger.info("sfx: %d suffixes expired" % self.num_expired)
             except Exception, e:
                 self.logger.error("check_all_devices():%s" % e)
 
@@ -83,6 +84,7 @@ class SuffixExpireWorker(object):
 
         self.logger.info(" num of partitions: %d" % part_list_len)
 
+        self.num_expired = 0
         cnt = 0
         for partition in part_list:
             try:
@@ -107,9 +109,8 @@ class SuffixExpireWorker(object):
         """
         expired_suffixes = self.update_hsexpire_pkl(part_path)
         if(expired_suffixes):
-            self.logger.debug("expired: %s in %s" % (expired_suffixes,
-                                                     part_path))
             self.update_expired_suffix(expired_suffixes, part_path)
+            self.num_expired += len(expired_suffixes)
 
     def get_pkl(self, hash_path):
         hashes = {}
@@ -151,11 +152,8 @@ class SuffixExpireWorker(object):
             intersect_keys = hashes_key_all.intersection(hsexpire_key_all)
             for k in removed_keys:
                 del hsexpire[k]
-                self.logger.debug("deleted %s in %s" % (k, part_path))
             for k in added_keys:
                 hsexpire[k] = new_expire_date
-                self.logger.debug("added %s:%d in %s" % (k, new_expire_date,
-                                                         part_path))
             if(len(removed_keys) + len(added_keys) > 0):
                 write_pickle(hsexpire, hsexpire_path, part_path,
                              PICKLE_PROTOCOL)
