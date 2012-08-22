@@ -233,7 +233,6 @@ class ObjectAuditor(Daemon):
     def run_once(self, *args, **kwargs):
         """Run the object audit once."""
         mode = kwargs.get('mode', 'once')
-
         zero_byte_only_at_fps = kwargs.get('zero_byte_fps', 0)
         worker = AuditorWorker(self.conf,
                                zero_byte_only_at_fps=zero_byte_only_at_fps)
