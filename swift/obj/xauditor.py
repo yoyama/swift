@@ -46,6 +46,7 @@ class SuffixExpireWorker(object):
             TRUE_VALUES
         self.expire_age = int(conf.get('sfx_expire_age', ONE_WEEK))
         self.logger.debug("expire_age :%d" % self.expire_age)
+        self.num_expired = 0
 
     def check_all_devices(self, datadir=object_server.DATADIR):
         """
